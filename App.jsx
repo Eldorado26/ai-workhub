@@ -244,7 +244,10 @@ function useSyncedDoc(path, seed) {
 }
 
 export default function App() {
-  const [session, setSession] = useState(null); // null | {type:'member',user} | {type:'admin'}
+  const [session, setSession] = useState(() => {
+    try { const s = localStorage.getItem("ph_session"); return s ? JSON.parse(s) : null; }
+    catch { return null; }
+  });
   const [tab, setTab] = useState("dashboard");
   const [tools, setTools] = useSyncedDoc("tools", seedTools);
   const [notices, setNotices] = useSyncedDoc("notices", seedNotices);
@@ -278,6 +281,13 @@ export default function App() {
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(null), 2200); };
   const isAdmin = session?.type === "admin";
+
+  useEffect(() => {
+    try {
+      if (session) localStorage.setItem("ph_session", JSON.stringify(session));
+      else localStorage.removeItem("ph_session");
+    } catch (e) { /* ignore */ }
+  }, [session]);
 
   const loginMember = (name, pw) => {
     if (!name || !pw) return "이름과 비밀번호를 입력하세요";
