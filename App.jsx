@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   LayoutDashboard, Boxes, Megaphone, MessagesSquare, Sparkles, ShieldCheck,
   Plus, Search, CheckCircle2, Clock, X, ExternalLink, User, ThumbsUp, Send,
-  Star, Crown, Calendar, StickyNote, Trash2, Circle, LogOut,
+  Star, Crown, Calendar, StickyNote, Trash2, Circle, LogOut, Pencil,
 } from "lucide-react";
 import { db } from "./firebase";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
@@ -214,6 +214,10 @@ button{font-family:inherit}
 .msg.ok{background:#E4F6EE;color:#22A06B}
 .hint{margin-top:16px;border-radius:12px;background:#F6F5FC;padding:10px 12px;font-size:11px;color:#7C789E;line-height:1.7}
 .identity{display:inline-flex;align-items:center;gap:8px;border-radius:999px;background:rgba(255,255,255,.1);padding:8px 14px;font-size:12px;font-weight:600;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.15)}
+.mini{width:28px;height:28px;border-radius:8px;border:0;cursor:pointer;background:#F2F1FA;display:grid;place-items:center;flex:none}
+.mini:hover{background:#E6E2FA}
+.mini.del:hover{background:#FBE6E6}
+.acts{display:flex;gap:6px}
 `;
 
 const cls = (...a) => a.filter(Boolean).join(" ");
@@ -367,7 +371,7 @@ export default function App() {
         {tab === "dashboard" && <Dashboard {...{ tools, notices, requests, schedule, setSchedule, memos, setMemos, categories, setTab, flash }} />}
         {tab === "tools" && <ToolsBoard {...{ tools, setTools, categories, isAdmin, flash }} />}
         {tab === "notice" && <Notices {...{ notices, setNotices, isAdmin, flash }} />}
-        {tab === "request" && <Requests {...{ requests, setRequests, isAdmin, flash }} />}
+        {tab === "request" && <Requests {...{ requests, setRequests, isAdmin, flash }} me={isAdmin ? "관리자" : (session.user?.name || "사용자")} />}
         {tab === "ai" && <AIRecs tools={tools} setTab={setTab} />}
         {tab === "admin" && isAdmin && <Admin {...{ tools, setTools, users, setUsers, categories, setCategories, adminPw, setAdminPw, flash }} />}
 
@@ -605,36 +609,43 @@ function ToolsBoard({ tools, setTools, categories, isAdmin, flash }) {
   const [q, setQ] = useState("");
   const [catF, setCatF] = useState("전체");
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
   const filtered = useMemo(() => tools.filter((t) => (catF === "전체" || t.cat === catF) && (t.name + t.domain + t.desc).toLowerCase().includes(q.toLowerCase())), [tools, q, catF]);
   const approved = filtered.filter((t) => t.status === "approved");
   const pending = filtered.filter((t) => t.status === "pending");
+  const remove = (t) => { if (window.confirm(`'${t.name}'을(를) 삭제할까요?`)) { setTools((p) => p.filter((x) => x.id !== t.id)); flash("삭제되었습니다"); } };
+  const manage = (t) => isAdmin ? { onEdit: () => { setEditing(t); setOpen(true); }, onDelete: () => remove(t) } : {};
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="row gap3 wrapg">
         <div className="search"><Search size={16} color="#9C99B8" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="툴 이름·도메인·설명 검색" /></div>
-        <button className="btn btn-p" onClick={() => setOpen(true)}><Plus size={16} /> 도메인 추가</button>
+        <button className="btn btn-p" onClick={() => { setEditing(null); setOpen(true); }}><Plus size={16} /> 도메인 추가</button>
       </div>
       <div className="chips">{["전체", ...categories].map((c) => <button key={c} className={cls("chip", catF === c && "on")} onClick={() => setCatF(c)}>{c}</button>)}</div>
 
       <section className="card">
         <Eyebrow kr="승인된 AI 워크스페이스" en={`APPROVED · ${approved.length}`} right={<CheckCircle2 size={20} color="#22A06B" />} />
-        {approved.length === 0 ? <Empty msg="조건에 맞는 승인 툴이 없습니다." /> : <div className="grid2">{approved.map((t) => <ToolCard key={t.id} t={t} />)}</div>}
+        {approved.length === 0 ? <Empty msg="조건에 맞는 승인 툴이 없습니다." /> : <div className="grid2">{approved.map((t) => <ToolCard key={t.id} t={t} {...manage(t)} />)}</div>}
       </section>
 
       <section className="card dash">
         <Eyebrow kr="승인 전 · 팀원 등록" en={`PENDING · ${pending.length}`} right={<Clock size={20} color="#E0922F" />} />
         {pending.length === 0 ? <Empty msg="등록된 대기 툴이 없습니다." /> : (
           <div className="grid2">{pending.map((t) => (
-            <ToolCard key={t.id} t={t} action={isAdmin && <button className="btn btn-approve" onClick={() => { setTools((p) => p.map((x) => x.id === t.id ? { ...x, status: "approved", by: "관리자" } : x)); flash(`${t.name} 승인 완료`); }}>승인</button>} />
+            <ToolCard key={t.id} t={t} {...manage(t)} action={isAdmin && <button className="btn btn-approve" onClick={() => { setTools((p) => p.map((x) => x.id === t.id ? { ...x, status: "approved", by: "관리자" } : x)); flash(`${t.name} 승인 완료`); }}>승인</button>} />
           ))}</div>
         )}
       </section>
 
-      {open && <ToolForm categories={categories} onClose={() => setOpen(false)} onSubmit={(d) => { setTools((p) => [{ id: Date.now(), status: "pending", by: "나", fav: false, ...d }, ...p]); setOpen(false); flash("승인 대기 목록에 등록되었습니다"); }} />}
+      {open && <ToolForm categories={categories} initial={editing} onClose={() => { setOpen(false); setEditing(null); }} onSubmit={(d) => {
+        if (editing) { setTools((p) => p.map((x) => x.id === editing.id ? { ...x, ...d } : x)); flash("도메인이 수정되었습니다"); }
+        else { setTools((p) => [{ id: Date.now(), status: "pending", by: "나", fav: false, ...d }, ...p]); flash("승인 대기 목록에 등록되었습니다"); }
+        setOpen(false); setEditing(null);
+      }} />}
     </div>
   );
 }
-function ToolCard({ t, action }) {
+function ToolCard({ t, action, onEdit, onDelete }) {
   return (
     <div className="toolcard">
       <div className="row between" style={{ alignItems: "flex-start", gap: 8 }}>
@@ -650,16 +661,23 @@ function ToolCard({ t, action }) {
       <p className="t-desc clip2">{t.desc}</p>
       <div className="divider row between">
         <div className="row" style={{ gap: 6, fontSize: 11, color: "#9C99B8" }}><User size={14} /> {t.admin}</div>
-        <div className="row gap2"><span style={{ borderRadius: 6, background: "#F2F1FA", padding: "2px 8px", fontSize: 10, fontWeight: 600, color: "#6C4FE0" }}>{t.cat}</span>{action}</div>
+        <div className="row gap2">
+          <span style={{ borderRadius: 6, background: "#F2F1FA", padding: "2px 8px", fontSize: 10, fontWeight: 600, color: "#6C4FE0" }}>{t.cat}</span>
+          {action}
+          {onEdit && <button className="mini" title="수정" onClick={onEdit}><Pencil size={14} color="#6C4FE0" /></button>}
+          {onDelete && <button className="mini del" title="삭제" onClick={onDelete}><Trash2 size={14} color="#D14343" /></button>}
+        </div>
       </div>
     </div>
   );
 }
-function ToolForm({ categories, onClose, onSubmit }) {
-  const [f, setF] = useState({ name: "", domain: "", desc: "", cat: categories[0] || "", admin: "", sec: "S2" });
+function ToolForm({ categories, initial, onClose, onSubmit }) {
+  const [f, setF] = useState(initial
+    ? { name: initial.name, domain: initial.domain, desc: initial.desc, cat: initial.cat, admin: initial.admin, sec: initial.sec }
+    : { name: "", domain: "", desc: "", cat: categories[0] || "", admin: "", sec: "S2" });
   return (
-    <Modal title="도메인 추가" en="ADD DOMAIN" onClose={onClose}>
-      <p style={{ margin: "0 0 16px", fontSize: 12, color: "#7C789E" }}>등록 시 <b>승인 전 목록</b>에 들어가며, 관리자 승인 후 공개됩니다.</p>
+    <Modal title={initial ? "도메인 수정" : "도메인 추가"} en={initial ? "EDIT DOMAIN" : "ADD DOMAIN"} onClose={onClose}>
+      {!initial && <p style={{ margin: "0 0 16px", fontSize: 12, color: "#7C789E" }}>등록 시 <b>승인 전 목록</b>에 들어가며, 관리자 승인 후 공개됩니다.</p>}
       <div className="stack" style={{ gap: 12 }}>
         <Field label="툴 이름"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="예: Notion AI" /></Field>
         <Field label="도메인"><input className="input" value={f.domain} onChange={(e) => setF({ ...f, domain: e.target.value })} placeholder="예: notion.so" /></Field>
@@ -670,7 +688,7 @@ function ToolForm({ categories, onClose, onSubmit }) {
         </div>
         <Field label="담당자 정보"><input className="input" value={f.admin} onChange={(e) => setF({ ...f, admin: e.target.value })} placeholder="예: 홍길동 (부서명)" /></Field>
       </div>
-      <FormBtns onClose={onClose} ok={f.name && f.domain && f.admin} onSubmit={() => onSubmit(f)} label="등록 요청" />
+      <FormBtns onClose={onClose} ok={f.name && f.domain && f.admin} onSubmit={() => onSubmit(f)} label={initial ? "수정" : "등록 요청"} />
     </Modal>
   );
 }
@@ -678,32 +696,48 @@ function ToolForm({ categories, onClose, onSubmit }) {
 /* ── 3. 공지 ───────────────────────────────── */
 function Notices({ notices, setNotices, isAdmin, flash }) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
   const sorted = [...notices].sort((a, b) => (b.pin ? 1 : 0) - (a.pin ? 1 : 0));
+  const openAdd = () => { setEditing(null); setOpen(true); };
+  const openEdit = (n) => { setEditing(n); setOpen(true); };
+  const remove = (n) => { if (window.confirm(`'${n.title}' 공지를 삭제할까요?`)) { setNotices((p) => p.filter((x) => x.id !== n.id)); flash("공지가 삭제되었습니다"); } };
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="row between">
         <Eyebrow kr="공지사항" en="NOTICE" />
-        {isAdmin && <button className="btn btn-p" onClick={() => setOpen(true)}><Plus size={16} /> 공지 추가</button>}
+        {isAdmin && <button className="btn btn-p" onClick={openAdd}><Plus size={16} /> 공지 추가</button>}
       </div>
       <div className="stack" style={{ gap: 12 }}>
         {sorted.map((n) => (
           <article key={n.id} className={cls("card", n.pin && "dark")}>
             <div className="row between">
               <div className="row gap2"><span className={cls("tag", n.pin && "pin")}>{n.tag}</span><h3 className="t-title">{n.title}</h3></div>
-              <span className="mono" style={{ fontSize: 12, color: n.pin ? "#B5B1DC" : "#9C99B8" }}>{n.date}</span>
+              <div className="row gap2">
+                <span className="mono" style={{ fontSize: 12, color: n.pin ? "#B5B1DC" : "#9C99B8" }}>{n.date}</span>
+                {isAdmin && (
+                  <div className="acts">
+                    <button className="mini" title="수정" onClick={() => openEdit(n)}><Pencil size={14} color="#6C4FE0" /></button>
+                    <button className="mini del" title="삭제" onClick={() => remove(n)}><Trash2 size={14} color="#D14343" /></button>
+                  </div>
+                )}
+              </div>
             </div>
             <p style={{ margin: "8px 0 0", fontSize: 13.5, lineHeight: 1.6, color: n.pin ? "#D6D3F0" : "#5B5780" }}>{n.body}</p>
           </article>
         ))}
       </div>
-      {open && <NoticeForm onClose={() => setOpen(false)} onSubmit={(d) => { setNotices((p) => [{ id: Date.now(), date: "오늘", pin: false, ...d }, ...p]); setOpen(false); flash("공지가 등록되었습니다"); }} />}
+      {open && <NoticeForm initial={editing} onClose={() => { setOpen(false); setEditing(null); }} onSubmit={(d) => {
+        if (editing) { setNotices((p) => p.map((x) => x.id === editing.id ? { ...x, ...d } : x)); flash("공지가 수정되었습니다"); }
+        else { setNotices((p) => [{ id: Date.now(), date: "오늘", pin: false, ...d }, ...p]); flash("공지가 등록되었습니다"); }
+        setOpen(false); setEditing(null);
+      }} />}
     </div>
   );
 }
-function NoticeForm({ onClose, onSubmit }) {
-  const [f, setF] = useState({ tag: "공지", title: "", body: "", pin: false });
+function NoticeForm({ initial, onClose, onSubmit }) {
+  const [f, setF] = useState(initial ? { tag: initial.tag, title: initial.title, body: initial.body, pin: initial.pin } : { tag: "공지", title: "", body: "", pin: false });
   return (
-    <Modal title="공지 작성" en="NEW NOTICE" onClose={onClose}>
+    <Modal title={initial ? "공지 수정" : "공지 작성"} en={initial ? "EDIT NOTICE" : "NEW NOTICE"} onClose={onClose}>
       <div className="stack" style={{ gap: 12 }}>
         <div className="grid2">
           <Field label="태그"><select className="input" value={f.tag} onChange={(e) => setF({ ...f, tag: e.target.value })}>{["필독", "공지", "교육", "업데이트"].map((t) => <option key={t}>{t}</option>)}</select></Field>
@@ -712,30 +746,42 @@ function NoticeForm({ onClose, onSubmit }) {
         <Field label="제목"><input className="input" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
         <Field label="내용"><textarea className="input" rows={4} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} /></Field>
       </div>
-      <FormBtns onClose={onClose} ok={!!f.title} onSubmit={() => onSubmit(f)} />
+      <FormBtns onClose={onClose} ok={!!f.title} onSubmit={() => onSubmit(f)} label={initial ? "수정" : "등록"} />
     </Modal>
   );
 }
 
 /* ── 4. 요청 ───────────────────────────────── */
-function Requests({ requests, setRequests, isAdmin, flash }) {
+function Requests({ requests, setRequests, isAdmin, me, flash }) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [reply, setReply] = useState({});
   const addReply = (id) => { const body = reply[id]; if (!body) return; setRequests((p) => p.map((r) => r.id === id ? { ...r, status: "답변완료", answers: [...r.answers, { by: "관리자", body, date: "오늘" }] } : r)); setReply({ ...reply, [id]: "" }); flash("답변이 등록되었습니다"); };
+  const remove = (r) => { if (window.confirm(`'${r.title}' 요청을 삭제할까요?`)) { setRequests((p) => p.filter((x) => x.id !== r.id)); flash("요청이 삭제되었습니다"); } };
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="row between">
         <Eyebrow kr="요청사항" en="REQUEST" />
-        <button className="btn btn-p" onClick={() => setOpen(true)}><Plus size={16} /> 요청 등록</button>
+        <button className="btn btn-p" onClick={() => { setEditing(null); setOpen(true); }}><Plus size={16} /> 요청 등록</button>
       </div>
       <div className="stack" style={{ gap: 12 }}>
-        {requests.map((r) => (
+        {requests.map((r) => {
+          const canManage = isAdmin || r.by === me;
+          return (
           <article key={r.id} className="card">
             <div className="row between" style={{ alignItems: "flex-start", gap: 12 }}>
               <div style={{ flex: 1 }}>
                 <div className="row gap2"><h3 className="t-title">{r.title}</h3><Status s={r.status} /></div>
                 <p style={{ margin: "6px 0 0", fontSize: 13.5, lineHeight: 1.6, color: "#5B5780" }}>{r.body}</p>
-                <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>{r.by} · {r.date}</div>
+                <div className="row between" style={{ marginTop: 8 }}>
+                  <div className="muted" style={{ fontSize: 12 }}>{r.by} · {r.date}</div>
+                  {canManage && (
+                    <div className="acts">
+                      <button className="mini" title="수정" onClick={() => { setEditing(r); setOpen(true); }}><Pencil size={14} color="#6C4FE0" /></button>
+                      <button className="mini del" title="삭제" onClick={() => remove(r)}><Trash2 size={14} color="#D14343" /></button>
+                    </div>
+                  )}
+                </div>
               </div>
               <button className="upv" onClick={() => setRequests((p) => p.map((x) => x.id === r.id ? { ...x, up: x.up + 1 } : x))}><ThumbsUp size={16} color="#6C4FE0" /><span style={{ fontSize: 13, fontWeight: 700 }}>{r.up}</span></button>
             </div>
@@ -752,21 +798,25 @@ function Requests({ requests, setRequests, isAdmin, flash }) {
               </div>
             )}
           </article>
-        ))}
+        ); })}
       </div>
-      {open && <RequestForm onClose={() => setOpen(false)} onSubmit={(d) => { setRequests((p) => [{ id: Date.now(), by: "나", date: "오늘", status: "접수", up: 0, answers: [], ...d }, ...p]); setOpen(false); flash("요청이 등록되었습니다"); }} />}
+      {open && <RequestForm initial={editing} onClose={() => { setOpen(false); setEditing(null); }} onSubmit={(d) => {
+        if (editing) { setRequests((p) => p.map((x) => x.id === editing.id ? { ...x, ...d } : x)); flash("요청이 수정되었습니다"); }
+        else { setRequests((p) => [{ id: Date.now(), by: me, date: "오늘", status: "접수", up: 0, answers: [], ...d }, ...p]); flash("요청이 등록되었습니다"); }
+        setOpen(false); setEditing(null);
+      }} />}
     </div>
   );
 }
-function RequestForm({ onClose, onSubmit }) {
-  const [f, setF] = useState({ title: "", body: "" });
+function RequestForm({ initial, onClose, onSubmit }) {
+  const [f, setF] = useState(initial ? { title: initial.title, body: initial.body } : { title: "", body: "" });
   return (
-    <Modal title="요청 등록" en="NEW REQUEST" onClose={onClose}>
+    <Modal title={initial ? "요청 수정" : "요청 등록"} en={initial ? "EDIT REQUEST" : "NEW REQUEST"} onClose={onClose}>
       <div className="stack" style={{ gap: 12 }}>
         <Field label="제목"><input className="input" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="예: OO 툴 도입 검토 요청" /></Field>
         <Field label="내용"><textarea className="input" rows={4} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} placeholder="필요한 이유와 용도를 적어주세요" /></Field>
       </div>
-      <FormBtns onClose={onClose} ok={!!f.title} onSubmit={() => onSubmit(f)} />
+      <FormBtns onClose={onClose} ok={!!f.title} onSubmit={() => onSubmit(f)} label={initial ? "수정" : "등록"} />
     </Modal>
   );
 }
