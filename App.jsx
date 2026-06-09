@@ -14,6 +14,7 @@ const SECURITY = {
   S2: { label: "S2 사내", color: "#C58A12", bg: "#FBF1DC" },
   S3: { label: "S3 기밀", color: "#D14343", bg: "#FBE6E6" },
 };
+const SEC_RANK = { S1: 1, S2: 2, S3: 3 }; // 숫자가 클수록 높은 등급 (열람 권한)
 const seedTools = [
   { id: 1, name: "ChatGPT Enterprise", domain: "chatgpt.com", desc: "범용 LLM. 문서 초안·요약·아이디에이션 전반에 사용.", cat: "문서작성", admin: "김도현 (전략기획)", sec: "S2", status: "approved", by: "관리자", fav: true },
   { id: 2, name: "Claude", domain: "claude.ai", desc: "긴 문서 분석·검토와 코드 리뷰에 강점.", cat: "개발", admin: "이서연 (개발팀)", sec: "S2", status: "approved", by: "관리자", fav: true },
@@ -285,6 +286,8 @@ export default function App() {
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(null), 2200); };
   const isAdmin = session?.type === "admin";
+  const myUser = session?.type === "member" ? (users.find((u) => u.id === session.user.id) || session.user) : null;
+  const myRank = isAdmin ? 99 : (SEC_RANK[myUser?.sec] || 1);
 
   useEffect(() => {
     try {
@@ -353,6 +356,7 @@ export default function App() {
               <span className="identity">
                 {isAdmin ? <Crown size={16} color="#FFD466" /> : <User size={16} />}
                 {isAdmin ? "관리자" : session.user.name}
+                {!isAdmin && myUser && <span className="sec" style={{ color: SECURITY[myUser.sec].color, background: SECURITY[myUser.sec].bg }}>{myUser.sec}</span>}
               </span>
               <button className="switch" onClick={logout}>
                 <LogOut size={16} /> 로그아웃
@@ -368,8 +372,8 @@ export default function App() {
           </nav>
         </header>
 
-        {tab === "dashboard" && <Dashboard {...{ tools, notices, requests, schedule, setSchedule, memos, setMemos, categories, setTab, flash }} />}
-        {tab === "tools" && <ToolsBoard {...{ tools, setTools, categories, isAdmin, flash }} />}
+        {tab === "dashboard" && <Dashboard {...{ tools, notices, requests, schedule, setSchedule, memos, setMemos, categories, setTab, flash, isAdmin, myRank }} />}
+        {tab === "tools" && <ToolsBoard {...{ tools, setTools, categories, isAdmin, myRank, myUser, flash }} />}
         {tab === "notice" && <Notices {...{ notices, setNotices, isAdmin, flash }} />}
         {tab === "request" && <Requests {...{ requests, setRequests, isAdmin, flash }} me={isAdmin ? "관리자" : (session.user?.name || "사용자")} />}
         {tab === "ai" && <AIRecs tools={tools} setTab={setTab} />}
@@ -473,7 +477,7 @@ const FormBtns = ({ onClose, ok, onSubmit, label = "등록" }) => (
 );
 
 /* ── 1. 대시보드 ───────────────────────────── */
-function Dashboard({ tools, notices, requests, schedule, setSchedule, memos, setMemos, categories, setTab, flash }) {
+function Dashboard({ tools, notices, requests, schedule, setSchedule, memos, setMemos, categories, setTab, flash, isAdmin, myRank }) {
   const [domF, setDomF] = useState("ALL");
   const [memoVal, setMemoVal] = useState("");
   const [schForm, setSchForm] = useState(false);
@@ -481,7 +485,7 @@ function Dashboard({ tools, notices, requests, schedule, setSchedule, memos, set
   const pending = tools.filter((t) => t.status === "pending");
   const sortedNotice = [...notices].sort((a, b) => (b.pin ? 1 : 0) - (a.pin ? 1 : 0));
   const domFilters = ["ALL", "승인", "대기", ...categories.slice(0, 3)];
-  const domList = approved.concat(pending).filter((t) => domF === "ALL" ? true : domF === "승인" ? t.status === "approved" : domF === "대기" ? t.status === "pending" : t.cat === domF);
+  const domList = approved.filter((t) => isAdmin || SEC_RANK[t.sec] <= myRank).concat(pending).filter((t) => domF === "ALL" ? true : domF === "승인" ? t.status === "approved" : domF === "대기" ? t.status === "pending" : t.cat === domF);
 
   return (
     <div className="board">
@@ -605,13 +609,13 @@ function ScheduleForm({ onClose, onSubmit }) {
 }
 
 /* ── 2. AI 워크스페이스 ─────────────────────────────── */
-function ToolsBoard({ tools, setTools, categories, isAdmin, flash }) {
+function ToolsBoard({ tools, setTools, categories, isAdmin, myRank, myUser, flash }) {
   const [q, setQ] = useState("");
   const [catF, setCatF] = useState("전체");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const filtered = useMemo(() => tools.filter((t) => (catF === "전체" || t.cat === catF) && (t.name + t.domain + t.desc).toLowerCase().includes(q.toLowerCase())), [tools, q, catF]);
-  const approved = filtered.filter((t) => t.status === "approved");
+  const approved = filtered.filter((t) => t.status === "approved" && (isAdmin || SEC_RANK[t.sec] <= myRank));
   const pending = filtered.filter((t) => t.status === "pending");
   const remove = (t) => { if (window.confirm(`'${t.name}'을(를) 삭제할까요?`)) { setTools((p) => p.filter((x) => x.id !== t.id)); flash("삭제되었습니다"); } };
   const manage = (t) => isAdmin ? { onEdit: () => { setEditing(t); setOpen(true); }, onDelete: () => remove(t) } : {};
@@ -621,11 +625,16 @@ function ToolsBoard({ tools, setTools, categories, isAdmin, flash }) {
         <div className="search"><Search size={16} color="#9C99B8" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="툴 이름·도메인·설명 검색" /></div>
         <button className="btn btn-p" onClick={() => { setEditing(null); setOpen(true); }}><Plus size={16} /> 도메인 추가</button>
       </div>
+      {!isAdmin && myUser && (
+        <div className="row gap2" style={{ fontSize: 12, color: "#7C789E" }}>
+          <Sec sec={myUser.sec} /> 내 보안등급 이하의 도메인만 열람됩니다.
+        </div>
+      )}
       <div className="chips">{["전체", ...categories].map((c) => <button key={c} className={cls("chip", catF === c && "on")} onClick={() => setCatF(c)}>{c}</button>)}</div>
 
       <section className="card">
         <Eyebrow kr="승인된 AI 워크스페이스" en={`APPROVED · ${approved.length}`} right={<CheckCircle2 size={20} color="#22A06B" />} />
-        {approved.length === 0 ? <Empty msg="조건에 맞는 승인 툴이 없습니다." /> : <div className="grid2">{approved.map((t) => <ToolCard key={t.id} t={t} {...manage(t)} />)}</div>}
+        {approved.length === 0 ? <Empty msg="열람 가능한 승인 도메인이 없습니다." /> : <div className="grid2">{approved.map((t) => <ToolCard key={t.id} t={t} {...manage(t)} />)}</div>}
       </section>
 
       <section className="card dash">
